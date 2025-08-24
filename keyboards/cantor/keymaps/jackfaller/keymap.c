@@ -1,6 +1,10 @@
 #ifndef QMK_KEYBOARD_H
 #include "fake-qmk.h"
+#include <stdio.h>
 #define FAKE_HARDWARE
+#define eprintf(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define eprintf(...)
 #endif
 
 #define LENGTH(A) (sizeof(A) / sizeof(A[0]))
@@ -8,23 +12,25 @@
 #include "quantum_keycodes.h"
 enum {
 	_IGNORED = SAFE_RANGE,
-	LALT_LOCK,
+	LOCK_START,
+	LALT_LOCK = LOCK_START,
 	LCTL_LOCK,
 	LSFT_LOCK,
 	LGUI_LOCK,
 	PSCR_LOCK,
 	LOCK_RELEASE,
-
-	LOCK_START = LALT_LOCK,
 };
-#include "jackfaller.h"
-
 static uint8_t lock_keys[] = {
 	KC_LALT, KC_LGUI, KC_LCTL, KC_LSFT, KC_PSCR,
 };
 static bool is_lock(uint16_t code) {
 	return LOCK_START <= code && code <= LOCK_START + LENGTH(lock_keys);
 }
+static uint16_t lock_code(uint16_t code) {
+	return lock_keys[code - LOCK_START];
+}
+
+#include "configurator_keys.h"
 
 static bool is_mod_tap(uint16_t code) {
 	return (code & QK_MOD_TAP) == QK_MOD_TAP;
@@ -35,7 +41,7 @@ static bool is_layer_tap(uint16_t code) {
 static bool is_dual(uint16_t code) {
 	return is_mod_tap(code) || is_layer_tap(code);
 }
-static uint8_t dual_primary(uint16_t code) {
+static uint16_t dual_primary(uint16_t code) {
 	if (is_mod_tap(code))
 		return QK_MOD_TAP_GET_TAP_KEYCODE(code);
 	else if (is_layer_tap(code))
@@ -63,10 +69,10 @@ static uint16_t dual_secondary(uint16_t code) {
 }
 
 #define BITSET(name, len) uint8_t name[((len) + 7) / 8]
-bool bitset_get(uint8_t *bitset, int i) {
+static bool bitset_get(uint8_t *bitset, int i) {
 	return (bitset[i / 8] & (1 << (i % 8))) != 0;
 }
-void bitset_set(uint8_t *bitset, int i, bool value) {
+static void bitset_set(uint8_t *bitset, int i, bool value) {
 	int index = i / 8, subindex = i % 8;
 	uint8_t old_val = bitset[index];
 	bool old = old_val & 1 << subindex;
@@ -75,122 +81,204 @@ void bitset_set(uint8_t *bitset, int i, bool value) {
 
 typedef uint8_t keynum;
 
-static layer_state_t layer_on_press[MATRIX_ROWS * MATRIX_COLS];
-static BITSET(key_held, MATRIX_ROWS *MATRIX_COLS);
+#define KEY_COUNT (MATRIX_ROWS * MATRIX_COLS)
 static struct {
-	keynum keys[MATRIX_ROWS * MATRIX_COLS];
-	BITSET(states, MATRIX_ROWS *MATRIX_COLS);
+	keynum keys[KEY_COUNT];
+	BITSET(states, KEY_COUNT);
 	// Assume the queue can never be full.
 	uint8_t count[MATRIX_ROWS * MATRIX_COLS];
 	uint8_t front, back;
 } queue;
 
-#define KEY_AT(keynum) keynum % MATRIX_ROWS][keynum / MATRIX_ROWS
+static uint16_t get_code(keynum key, layer_state_t layer) {
+	return keymaps[layer][key / MATRIX_ROWS][key % MATRIX_ROWS];
+}
 static keynum to_keynum(keypos_t keypos) {
 	return keypos.col + keypos.row * MATRIX_ROWS;
 }
 
-static bool in_queue(keynum key) { return queue.count[key] != 0; }
 static bool queue_empty(void) { return queue.front == queue.back; }
 static uint8_t queue_next_index(uint8_t i) {
 	return (i + 1) % LENGTH(queue.keys);
 }
+static bool front_pressed(void) {
+	return bitset_get(queue.states, queue.front);
+}
+static keynum front_key(void) { return queue.keys[queue.front]; }
+
 static void enqueue(keynum key, bool pressed) {
 	++queue.count[key];
 	queue.keys[queue.back] = key;
-	bitset_set(queue.states, key, pressed);
+	bitset_set(queue.states, queue.back, pressed);
 	queue.back = queue_next_index(queue.back);
 }
-static void dequeue() {
+static void dequeue(void) {
 	--queue.count[queue.keys[queue.front]];
 	queue.front = queue_next_index(queue.front);
 }
-static bool front_pressed() { return bitset_get(queue.states, queue.front); }
-static bool front_key() { return queue.keys[queue.front]; }
 
-static void write_key(keynum key, bool pressed, bool held) {}
+static void write_key(keynum key, bool pressed, bool held) {
+	static uint16_t cache[KEY_COUNT];
+	static BITSET(lock_key_pressed, LENGTH(lock_keys));
+	uint16_t code;
+	if (pressed)
+		code = cache[key]
+			= (held ? dual_secondary
+		            : dual_primary)(get_code(key, layer_state));
+	else
+		code = cache[key];
+
+	if (is_lock(code)) {
+		if (pressed) {
+			pressed = bitset_get(lock_key_pressed, code - LOCK_START);
+			bitset_set(lock_key_pressed, code - LOCK_START, !pressed);
+			code = lock_code(code);
+		} else {
+			code = KC_NO;
+		}
+	}
+
+	if (code == LOCK_RELEASE) {
+		for (int i = 0; i < LENGTH(lock_keys); ++i) {
+			if (bitset_get(lock_key_pressed, i)) {
+				unregister_code16(lock_keys[i]);
+				bitset_set(lock_key_pressed, i, false);
+			}
+		}
+	} else {
+		(pressed ? register_code16 : unregister_code16)(code);
+	}
+}
 
 enum { PROCESSED = false, UNPROCESSED = true };
 
 bool process_record_user(uint16_t _ignored, keyrecord_t *record) {
-	keynum num = to_keynum(record->event.key);
+	keynum key = to_keynum(record->event.key);
 	bool pressed = record->event.pressed;
+	enqueue(key, pressed);
+	// Should also clear if the key has no chance of being a mod tap key.
+	if (queue.count[key] >= 2 && pressed == false) {
+		while (!(queue.count[key] == 2 && front_key() == key)) {
+			write_key(front_key(), front_pressed(), true);
+			dequeue();
+		}
+		write_key(key, true, false);
+		dequeue();
+	}
+	while (
+		!queue_empty()
+		&& !(front_pressed() && is_dual(get_code(front_key(), layer_state)))
+	) {
+		write_key(front_key(), front_pressed(), false);
+		dequeue();
+	}
 	return PROCESSED;
 }
 
 #ifdef FAKE_HARDWARE
-#include <stdio.h>
-#define eprintf(...) fprintf(stderr, __VA_ARGS__)
+
 static keypos_t reverse_map[256];
-static keypos_t getpos(uint8_t code) { return reverse_map[code]; }
-static uint8_t getcode(keypos_t pos) {
-	return dual_primary(keymaps[0][pos.row][pos.col]);
-}
-static void fill_reverse_map() {
+static const char *code_names[256 * 256];
+const char *code_name(uint16_t code) { return code_names[code]; }
+static void fill_maps() {
 	for (int row = 0; row < MATRIX_ROWS; ++row)
 		for (int col = 0; col < MATRIX_COLS; ++col) {
 			keypos_t pos = { .col = col, .row = row };
-			reverse_map[getcode(pos)] = pos;
+			reverse_map[dual_primary(keymaps[0][row][col])] = pos;
 		}
+#define ADD_KEY(X) code_names[X] = #X
+	ADD_KEY(KC_A);
+	ADD_KEY(KC_B);
+	ADD_KEY(KC_C);
+	ADD_KEY(KC_D);
+	ADD_KEY(KC_E);
+	ADD_KEY(KC_F);
+	ADD_KEY(KC_G);
+	ADD_KEY(KC_H);
+	ADD_KEY(KC_I);
+	ADD_KEY(KC_J);
+	ADD_KEY(KC_K);
+	ADD_KEY(KC_L);
+	ADD_KEY(KC_M);
+	ADD_KEY(KC_N);
+	ADD_KEY(KC_O);
+	ADD_KEY(KC_P);
+	ADD_KEY(KC_Q);
+	ADD_KEY(KC_R);
+	ADD_KEY(KC_S);
+	ADD_KEY(KC_T);
+	ADD_KEY(KC_U);
+	ADD_KEY(KC_V);
+	ADD_KEY(KC_W);
+	ADD_KEY(KC_X);
+	ADD_KEY(KC_Y);
+	ADD_KEY(KC_Z);
+	ADD_KEY(KC_0);
+	ADD_KEY(KC_1);
+	ADD_KEY(KC_2);
+	ADD_KEY(KC_3);
+	ADD_KEY(KC_4);
+	ADD_KEY(KC_5);
+	ADD_KEY(KC_6);
+	ADD_KEY(KC_7);
+	ADD_KEY(KC_8);
+	ADD_KEY(KC_9);
+	ADD_KEY(KC_TAB);
+	ADD_KEY(KC_SPACE);
+	ADD_KEY(KC_ESCAPE);
+	ADD_KEY(KC_ENTER);
+	ADD_KEY(KC_BACKSPACE);
+	ADD_KEY(KC_QUOTE);
+	ADD_KEY(KC_LGUI);
+	ADD_KEY(KC_LALT);
+	ADD_KEY(KC_LSFT);
+	ADD_KEY(KC_LCTL);
+	ADD_KEY(KC_RGUI);
+	ADD_KEY(KC_RALT);
+	ADD_KEY(KC_RSFT);
+	ADD_KEY(KC_RCTL);
+#undef ADD_KEY
+#define ADD_MO(X) code_names[MO(X)] = "MO(" #X ")"
+	ADD_MO(0);
+	ADD_MO(1);
+	ADD_MO(2);
+	ADD_MO(3);
+	ADD_MO(4);
+	ADD_MO(5);
+	ADD_MO(6);
+	ADD_MO(7);
+	ADD_MO(8);
+	ADD_MO(9);
+	ADD_MO(10);
+	ADD_MO(11);
+	ADD_MO(12);
+	ADD_MO(13);
+	ADD_MO(14);
+	ADD_MO(15);
+#undef ADD_MO
 }
-const char *code_name(uint8_t code) {
-	switch (code) {
-#define CASE(X) \
-	case X: return #X
-		CASE(KC_A);
-		CASE(KC_B);
-		CASE(KC_C);
-		CASE(KC_D);
-		CASE(KC_E);
-		CASE(KC_F);
-		CASE(KC_G);
-		CASE(KC_H);
-		CASE(KC_I);
-		CASE(KC_J);
-		CASE(KC_K);
-		CASE(KC_L);
-		CASE(KC_M);
-		CASE(KC_N);
-		CASE(KC_O);
-		CASE(KC_P);
-		CASE(KC_Q);
-		CASE(KC_R);
-		CASE(KC_S);
-		CASE(KC_T);
-		CASE(KC_U);
-		CASE(KC_V);
-		CASE(KC_W);
-		CASE(KC_X);
-		CASE(KC_Y);
-		CASE(KC_Z);
-		CASE(KC_0);
-		CASE(KC_1);
-		CASE(KC_2);
-		CASE(KC_3);
-		CASE(KC_4);
-		CASE(KC_5);
-		CASE(KC_6);
-		CASE(KC_7);
-		CASE(KC_8);
-		CASE(KC_9);
-		CASE(KC_TAB);
-		CASE(KC_SPACE);
-		CASE(KC_ESCAPE);
-		CASE(KC_ENTER);
-		CASE(KC_BACKSPACE);
-		CASE(KC_QUOTE);
-#undef case
-	default: return "UNKNOWN";
-	}
+
+layer_state_t layer_state;
+static void print_key(uint16_t code, bool pressed) {
+	eprintf("OUTPUT %s, %d\n", code_name(code), (int)pressed);
 }
+void register_code16(uint16_t code) { print_key(code, true); }
+void unregister_code16(uint16_t code) { print_key(code, false); }
+
 static void key(uint8_t code, bool pressed) {
-	keyrecord_t record
-		= { .event = { .key = getpos(code), .pressed = pressed } };
-	eprintf("key(%s, %d);\n", code_name(code), (int)pressed);
+	keypos_t pos = reverse_map[code];
+	keyrecord_t record = { .event = { .key = pos, .pressed = pressed } };
+	eprintf(
+		"key(%s (%d, %d), %d);\n",
+		code_name(code),
+		(int)pos.col,
+		(int)pos.row,
+		(int)pressed
+	);
 	process_record_user(0, &record);
 }
 int main(int argc, char **argv) {
-	fill_reverse_map();
+	fill_maps();
 	key(KC_K, 1);
 	key(KC_A, 1);
 	key(KC_A, 0);
