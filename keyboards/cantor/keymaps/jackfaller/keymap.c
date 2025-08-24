@@ -237,25 +237,50 @@ static void fill_maps() {
 	ADD_KEY(KC_RALT);
 	ADD_KEY(KC_RSFT);
 	ADD_KEY(KC_RCTL);
+	ADD_KEY(KC_NO);
+	ADD_KEY(KC_INS);
+	ADD_KEY(KC_END);
+	ADD_KEY(KC_HOME);
+	ADD_KEY(KC_LEFT);
+	ADD_KEY(KC_DOWN);
+	ADD_KEY(KC_UP);
+	ADD_KEY(KC_RGHT);
+	ADD_KEY(KC_PGUP);
+	ADD_KEY(KC_PGDN);
+	ADD_KEY(KC_PAUS);
+	ADD_KEY(KC_PGDN);
+	ADD_KEY(KC_PGUP);
+	ADD_KEY(KC_NO);
+	ADD_KEY(KC_TRNS);
+
+	ADD_KEY(LGUI_LOCK);
+	ADD_KEY(LALT_LOCK);
+	ADD_KEY(LSFT_LOCK);
+	ADD_KEY(LCTL_LOCK);
+	ADD_KEY(PSCR_LOCK);
+	ADD_KEY(LOCK_RELEASE);
+	ADD_KEY(LOCK_RELEASE);
 #undef ADD_KEY
-#define ADD_MO(X) code_names[MO(X)] = "MO(" #X ")"
-	ADD_MO(0);
-	ADD_MO(1);
-	ADD_MO(2);
-	ADD_MO(3);
-	ADD_MO(4);
-	ADD_MO(5);
-	ADD_MO(6);
-	ADD_MO(7);
-	ADD_MO(8);
-	ADD_MO(9);
-	ADD_MO(10);
-	ADD_MO(11);
-	ADD_MO(12);
-	ADD_MO(13);
-	ADD_MO(14);
-	ADD_MO(15);
-#undef ADD_MO
+#define ADD_LAYER(X) \
+	code_names[MO(X)] = "MO(" #X ")"; \
+	code_names[TG(X)] = "TG(" #X ")"
+	ADD_LAYER(0);
+	ADD_LAYER(1);
+	ADD_LAYER(2);
+	ADD_LAYER(3);
+	ADD_LAYER(4);
+	ADD_LAYER(5);
+	ADD_LAYER(6);
+	ADD_LAYER(7);
+	ADD_LAYER(8);
+	ADD_LAYER(9);
+	ADD_LAYER(10);
+	ADD_LAYER(11);
+	ADD_LAYER(12);
+	ADD_LAYER(13);
+	ADD_LAYER(14);
+	ADD_LAYER(15);
+#undef ADD_LAYER
 }
 
 layer_state_t layer_state;
