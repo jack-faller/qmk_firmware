@@ -1,0 +1,28 @@
+#!/usr/bin/env guile
+!#
+(use-modules (json)
+						 (srfi srfi-43))
+
+(define keyboard-width 12)
+
+(define contents (call-with-input-file (cadr (program-arguments)) json->scm))
+(define keymap (assoc-ref contents "keymap"))
+(define layers (assoc-ref contents "layers"))
+
+(define (flip-layer layer)
+	(define length (vector-length layer))
+	(vector-unfold
+	 (lambda (i)
+		 (define key (modulo i keyboard-width))
+		 (define base (- i key))
+		 (define flipped
+			 (- (if (> (+ base keyboard-width) length)
+							(- length base)
+							keyboard-width)
+					key 1))
+		 (vector-ref layer (+ base flipped)))
+	 length))
+
+(vector-map! (lambda (i e) (flip-layer e)) layers)
+(scm->json (assoc-set! contents "keymap" (string-append keymap "_flipped")))
+(newline)
