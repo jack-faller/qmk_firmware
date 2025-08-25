@@ -33,10 +33,10 @@ static uint16_t lock_code(uint16_t code) {
 #include "configurator_keys.h"
 
 static bool is_mod_tap(uint16_t code) {
-	return (code & QK_MOD_TAP) == QK_MOD_TAP;
+	return QK_MOD_TAP <= code && code <= QK_MOD_TAP_MAX;
 }
 static bool is_layer_tap(uint16_t code) {
-	return (code & QK_LAYER_TAP) == QK_LAYER_TAP;
+	return QK_LAYER_TAP <= code && code <= QK_LAYER_TAP_MAX;
 }
 static bool is_dual(uint16_t code) {
 	return is_mod_tap(code) || is_layer_tap(code);
@@ -264,6 +264,7 @@ static void fill_maps() {
 #define ADD_LAYER(X) \
 	code_names[MO(X)] = "MO(" #X ")"; \
 	code_names[TG(X)] = "TG(" #X ")"
+
 	ADD_LAYER(0);
 	ADD_LAYER(1);
 	ADD_LAYER(2);
@@ -283,12 +284,31 @@ static void fill_maps() {
 #undef ADD_LAYER
 }
 
+static bool is_momentary(uint16_t code) {
+	return QK_MOMENTARY <= code && code <= QK_MOMENTARY_MAX;
+}
+static bool is_toggle(uint16_t code) {
+	return QK_TOGGLE_LAYER <= code && code <= QK_TOGGLE_LAYER_MAX;
+}
+
 layer_state_t layer_state;
 static void print_key(uint16_t code, bool pressed) {
 	eprintf("OUTPUT %s, %d\n", code_name(code), (int)pressed);
 }
-void register_code16(uint16_t code) { print_key(code, true); }
-void unregister_code16(uint16_t code) { print_key(code, false); }
+
+static int default_layer;
+void register_code16(uint16_t code) {
+	if (is_momentary(code))
+		layer_state = QK_MOMENTARY_GET_LAYER(code);
+	else if (is_toggle(code))
+		layer_state = default_layer = QK_TOGGLE_LAYER_GET_LAYER(code);
+	print_key(code, true);
+}
+void unregister_code16(uint16_t code) {
+	if (is_momentary(code))
+		layer_state = default_layer;
+	print_key(code, false);
+}
 
 static void key(uint8_t code, bool pressed) {
 	keypos_t pos = reverse_map[code];
@@ -304,10 +324,16 @@ static void key(uint8_t code, bool pressed) {
 }
 int main(int argc, char **argv) {
 	fill_maps();
-	key(KC_K, 1);
-	key(KC_A, 1);
-	key(KC_A, 0);
-	key(KC_K, 0);
+	key(KC_ESC, 1);
+	key(KC_B, 1);
+	key(KC_B, 0);
+	key(KC_ESC, 0);
+	key(KC_D, 1);
+	key(KC_D, 0);
+	key(KC_ENTER, 1);
+	key(KC_ENTER, 0);
+	key(KC_D, 1);
+	key(KC_D, 0);
 	return 0;
 }
 #endif
