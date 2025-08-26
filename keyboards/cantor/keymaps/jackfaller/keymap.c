@@ -90,8 +90,16 @@ static struct {
 	uint8_t front, back;
 } queue;
 
-static uint16_t get_code(keynum key, layer_state_t layer) {
-	return keymaps[layer][key / MATRIX_ROWS][key % MATRIX_ROWS];
+static uint16_t get_code(keynum key) {
+	uint16_t out = KC_TRNS;
+	for (int highest = get_highest_layer(layer_state);
+	     out == KC_TRNS && highest >= 0;
+	     --highest) {
+		if (IS_LAYER_ON(highest)) {
+			out = keymaps[highest][key / MATRIX_ROWS][key % MATRIX_ROWS];
+		}
+	}
+	return out;
 }
 static keynum to_keynum(keypos_t keypos) {
 	return keypos.col + keypos.row * MATRIX_ROWS;
@@ -123,8 +131,7 @@ static void write_key(keynum key, bool pressed, bool held) {
 	uint16_t code;
 	if (pressed)
 		code = cache[key]
-			= (held ? dual_secondary
-		            : dual_primary)(get_code(key, layer_state));
+			= (held ? dual_secondary : dual_primary)(get_code(key));
 	else
 		code = cache[key];
 
@@ -165,10 +172,8 @@ bool process_record_user(uint16_t _ignored, keyrecord_t *record) {
 		write_key(key, true, false);
 		dequeue();
 	}
-	while (
-		!queue_empty()
-		&& !(front_pressed() && is_dual(get_code(front_key(), layer_state)))
-	) {
+	while (!queue_empty()
+	       && !(front_pressed() && is_dual(get_code(front_key())))) {
 		write_key(front_key(), front_pressed(), false);
 		dequeue();
 	}
@@ -291,22 +296,41 @@ static bool is_toggle(uint16_t code) {
 	return QK_TOGGLE_LAYER <= code && code <= QK_TOGGLE_LAYER_MAX;
 }
 
-layer_state_t layer_state;
 static void print_key(uint16_t code, bool pressed) {
 	eprintf("OUTPUT %s, %d\n", code_name(code), (int)pressed);
 }
 
-static int default_layer;
+layer_state_t layer_state = 1;
+uint8_t get_highest_layer(layer_state_t state) {
+	uint8_t n = 0;
+	if (state >> 8) {
+		state >>= 8;
+		n += 8;
+	}
+	if (state >> 4) {
+		state >>= 4;
+		n += 4;
+	}
+	if (state >> 2) {
+		state >>= 2;
+		n += 2;
+	}
+	if (state >> 1) {
+		state >>= 1;
+		n += 1;
+	}
+	return n;
+}
 void register_code16(uint16_t code) {
 	if (is_momentary(code))
-		layer_state = QK_MOMENTARY_GET_LAYER(code);
+		layer_state |= (1 << QK_MOMENTARY_GET_LAYER(code));
 	else if (is_toggle(code))
-		layer_state = default_layer = QK_TOGGLE_LAYER_GET_LAYER(code);
+		layer_state ^= 1 << QK_TOGGLE_LAYER_GET_LAYER(code);
 	print_key(code, true);
 }
 void unregister_code16(uint16_t code) {
 	if (is_momentary(code))
-		layer_state = default_layer;
+		layer_state &= ~(1 << QK_MOMENTARY_GET_LAYER(code));
 	print_key(code, false);
 }
 

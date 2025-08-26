@@ -21,6 +21,9 @@ typedef uint8_t layer_state_t;
 extern layer_state_t layer_state;
 void register_code16(uint16_t code);
 void unregister_code16(uint16_t code);
+uint8_t get_highest_layer(layer_state_t state);
+#define IS_LAYER_ON(l) ((1 << (l)) & layer_state)
+uint8_t get_highest_layer(layer_state_t state);
 
 typedef struct {
 	uint8_t col;
