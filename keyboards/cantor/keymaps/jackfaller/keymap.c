@@ -21,26 +21,6 @@ bool process_keycode_any(uint16_t keycode, const bool pressed);
 #include "modules/stephen_ostermiller/process_keycode_any/process_keycode_any.c"
 #endif
 
-enum {
-	_IGNORED = SAFE_RANGE,
-	LOCK_START,
-	LALT_LOCK = LOCK_START,
-	LCTL_LOCK,
-	LSFT_LOCK,
-	LGUI_LOCK,
-	PSCR_LOCK,
-	LOCK_RELEASE,
-};
-static uint8_t lock_keys[] = {
-	KC_LALT, KC_LGUI, KC_LCTL, KC_LSFT, KC_PSCR,
-};
-static bool is_lock(uint16_t code) {
-	return LOCK_START <= code && code <= LOCK_START + LENGTH(lock_keys);
-}
-static uint16_t lock_code(uint16_t code) {
-	return lock_keys[code - LOCK_START];
-}
-
 #include "configurator_keys.h"
 
 static bool is_mod_tap(uint16_t code) {
@@ -138,7 +118,6 @@ static void dequeue(void) {
 
 static void write_key(keynum key, bool pressed, bool held) {
 	static uint16_t cache[KEYNUM_MAX];
-	static BITSET(lock_key_pressed, LENGTH(lock_keys));
 	uint16_t code;
 	if (pressed)
 		code = cache[key]
@@ -146,33 +125,7 @@ static void write_key(keynum key, bool pressed, bool held) {
 	else
 		code = cache[key];
 
-	// Lock keys don't work while testing because we check that all keys are
-	// released.
-#ifdef TESTING
-	if (false)
-#endif
-	{
-		if (is_lock(code)) {
-			if (pressed) {
-				pressed = bitset_get(lock_key_pressed, code - LOCK_START);
-				bitset_set(lock_key_pressed, code - LOCK_START, !pressed);
-				code = lock_code(code);
-			} else {
-				code = KC_NO;
-			}
-		}
-	}
-
-	if (code == LOCK_RELEASE) {
-		for (int i = 0; i < LENGTH(lock_keys); ++i) {
-			if (bitset_get(lock_key_pressed, i)) {
-				process_keycode_any(lock_keys[i], false);
-				bitset_set(lock_key_pressed, i, false);
-			}
-		}
-	} else {
-		process_keycode_any(code, pressed);
-	}
+	process_keycode_any(code, pressed);
 }
 
 enum { PROCESSED = false, UNPROCESSED = true };
@@ -278,13 +231,7 @@ static void fill_maps() {
 	ADD_KEY(KC_NO);
 	ADD_KEY(KC_TRNS);
 
-	ADD_KEY(LGUI_LOCK);
-	ADD_KEY(LALT_LOCK);
-	ADD_KEY(LSFT_LOCK);
-	ADD_KEY(LCTL_LOCK);
-	ADD_KEY(PSCR_LOCK);
-	ADD_KEY(LOCK_RELEASE);
-	ADD_KEY(LOCK_RELEASE);
+	ADD_KEY(QK_LOCK);
 #undef ADD_KEY
 #define ADD_LAYER(X) \
 	code_names[MO(X)] = "MO(" #X ")"; \
