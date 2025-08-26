@@ -1,7 +1,7 @@
 #ifndef QMK_KEYBOARD_H
 #include "fake-qmk.h"
 #include <stdio.h>
-#define FAKE_HARDWARE
+#define TESTING
 #define eprintf(...) fprintf(stderr, __VA_ARGS__)
 #else
 #define eprintf(...)
@@ -10,6 +10,17 @@
 #define LENGTH(A) (sizeof(A) / sizeof(A[0]))
 
 #include "quantum_keycodes.h"
+
+bool process_keycode_any(uint16_t keycode, const bool pressed);
+#ifndef TESTING
+// This is not how you're supposed to use modules but I can't find any other
+// way.
+#define NO_ACTION_ONESHOT
+#undef ASSERT_COMMUNITY_MODULES_MIN_API_VERSION
+#define ASSERT_COMMUNITY_MODULES_MIN_API_VERSION(A, B, C)
+#include "modules/stephen_ostermiller/process_keycode_any/process_keycode_any.c"
+#endif
+
 enum {
 	_IGNORED = SAFE_RANGE,
 	LOCK_START,
@@ -80,13 +91,16 @@ static void bitset_set(uint8_t *bitset, int i, bool value) {
 }
 
 typedef uint8_t keynum;
+#define KEYNUM_MAX (MATRIX_ROWS * MATRIX_COLS)
+static keynum to_keynum(keypos_t keypos) {
+	return keypos.col + keypos.row * MATRIX_COLS;
+}
 
-#define KEY_COUNT (MATRIX_ROWS * MATRIX_COLS)
 static struct {
-	keynum keys[KEY_COUNT];
-	BITSET(states, KEY_COUNT);
+	keynum keys[KEYNUM_MAX];
+	BITSET(states, KEYNUM_MAX);
 	// Assume the queue can never be full.
-	uint8_t count[MATRIX_ROWS * MATRIX_COLS];
+	uint8_t count[KEYNUM_MAX];
 	uint8_t front, back;
 } queue;
 
@@ -96,13 +110,10 @@ static uint16_t get_code(keynum key) {
 	     out == KC_TRNS && highest >= 0;
 	     --highest) {
 		if (IS_LAYER_ON(highest)) {
-			out = keymaps[highest][key / MATRIX_ROWS][key % MATRIX_ROWS];
+			out = keymaps[highest][key / MATRIX_COLS][key % MATRIX_COLS];
 		}
 	}
 	return out;
-}
-static keynum to_keynum(keypos_t keypos) {
-	return keypos.col + keypos.row * MATRIX_ROWS;
 }
 
 static bool queue_empty(void) { return queue.front == queue.back; }
@@ -126,7 +137,7 @@ static void dequeue(void) {
 }
 
 static void write_key(keynum key, bool pressed, bool held) {
-	static uint16_t cache[KEY_COUNT];
+	static uint16_t cache[KEYNUM_MAX];
 	static BITSET(lock_key_pressed, LENGTH(lock_keys));
 	uint16_t code;
 	if (pressed)
@@ -135,25 +146,32 @@ static void write_key(keynum key, bool pressed, bool held) {
 	else
 		code = cache[key];
 
-	if (is_lock(code)) {
-		if (pressed) {
-			pressed = bitset_get(lock_key_pressed, code - LOCK_START);
-			bitset_set(lock_key_pressed, code - LOCK_START, !pressed);
-			code = lock_code(code);
-		} else {
-			code = KC_NO;
+	// Lock keys don't work while testing because we check that all keys are
+	// released.
+#ifdef TESTING
+	if (false)
+#endif
+	{
+		if (is_lock(code)) {
+			if (pressed) {
+				pressed = bitset_get(lock_key_pressed, code - LOCK_START);
+				bitset_set(lock_key_pressed, code - LOCK_START, !pressed);
+				code = lock_code(code);
+			} else {
+				code = KC_NO;
+			}
 		}
 	}
 
 	if (code == LOCK_RELEASE) {
 		for (int i = 0; i < LENGTH(lock_keys); ++i) {
 			if (bitset_get(lock_key_pressed, i)) {
-				unregister_code16(lock_keys[i]);
+				process_keycode_any(lock_keys[i], false);
 				bitset_set(lock_key_pressed, i, false);
 			}
 		}
 	} else {
-		(pressed ? register_code16 : unregister_code16)(code);
+		process_keycode_any(code, pressed);
 	}
 }
 
@@ -180,7 +198,40 @@ bool process_record_user(uint16_t _ignored, keyrecord_t *record) {
 	return PROCESSED;
 }
 
-#ifdef FAKE_HARDWARE
+#ifdef TESTING
+
+#define MAP_BASE_KEYS(F, JOIN) \
+	F(KC_A) JOIN F(KC_B) \
+	JOIN F(KC_C) \
+	JOIN F(KC_D) \
+	JOIN F(KC_E) \
+	JOIN F(KC_F) \
+	JOIN F(KC_G) \
+	JOIN F(KC_H) \
+	JOIN F(KC_I) \
+	JOIN F(KC_J) \
+	JOIN F(KC_K) \
+	JOIN F(KC_L) \
+	JOIN F(KC_M) \
+	JOIN F(KC_N) \
+	JOIN F(KC_O) \
+	JOIN F(KC_P) \
+	JOIN F(KC_Q) \
+	JOIN F(KC_R) \
+	JOIN F(KC_S) \
+	JOIN F(KC_T) \
+	JOIN F(KC_U) \
+	JOIN F(KC_V) \
+	JOIN F(KC_W) \
+	JOIN F(KC_X) \
+	JOIN F(KC_Y) \
+	JOIN F(KC_Z) \
+	JOIN F(KC_TAB) \
+	JOIN F(KC_SPACE) \
+	JOIN F(KC_ESCAPE) \
+	JOIN F(KC_ENTER) \
+	JOIN F(KC_BACKSPACE) \
+	JOIN F(KC_QUOTE)
 
 static keypos_t reverse_map[256];
 static const char *code_names[256 * 256];
@@ -192,32 +243,7 @@ static void fill_maps() {
 			reverse_map[dual_primary(keymaps[0][row][col])] = pos;
 		}
 #define ADD_KEY(X) code_names[X] = #X
-	ADD_KEY(KC_A);
-	ADD_KEY(KC_B);
-	ADD_KEY(KC_C);
-	ADD_KEY(KC_D);
-	ADD_KEY(KC_E);
-	ADD_KEY(KC_F);
-	ADD_KEY(KC_G);
-	ADD_KEY(KC_H);
-	ADD_KEY(KC_I);
-	ADD_KEY(KC_J);
-	ADD_KEY(KC_K);
-	ADD_KEY(KC_L);
-	ADD_KEY(KC_M);
-	ADD_KEY(KC_N);
-	ADD_KEY(KC_O);
-	ADD_KEY(KC_P);
-	ADD_KEY(KC_Q);
-	ADD_KEY(KC_R);
-	ADD_KEY(KC_S);
-	ADD_KEY(KC_T);
-	ADD_KEY(KC_U);
-	ADD_KEY(KC_V);
-	ADD_KEY(KC_W);
-	ADD_KEY(KC_X);
-	ADD_KEY(KC_Y);
-	ADD_KEY(KC_Z);
+	MAP_BASE_KEYS(ADD_KEY, ;);
 	ADD_KEY(KC_0);
 	ADD_KEY(KC_1);
 	ADD_KEY(KC_2);
@@ -228,12 +254,6 @@ static void fill_maps() {
 	ADD_KEY(KC_7);
 	ADD_KEY(KC_8);
 	ADD_KEY(KC_9);
-	ADD_KEY(KC_TAB);
-	ADD_KEY(KC_SPACE);
-	ADD_KEY(KC_ESCAPE);
-	ADD_KEY(KC_ENTER);
-	ADD_KEY(KC_BACKSPACE);
-	ADD_KEY(KC_QUOTE);
 	ADD_KEY(KC_LGUI);
 	ADD_KEY(KC_LALT);
 	ADD_KEY(KC_LSFT);
@@ -296,8 +316,21 @@ static bool is_toggle(uint16_t code) {
 	return QK_TOGGLE_LAYER <= code && code <= QK_TOGGLE_LAYER_MAX;
 }
 
-static void print_key(uint16_t code, bool pressed) {
+static int output_states[UINT16_MAX];
+bool process_keycode_any(uint16_t code, bool pressed) {
+	if (pressed) {
+		if (is_momentary(code))
+			layer_state |= (1 << QK_MOMENTARY_GET_LAYER(code));
+		else if (is_toggle(code))
+			layer_state ^= 1 << QK_TOGGLE_LAYER_GET_LAYER(code);
+	} else {
+		if (is_momentary(code))
+			layer_state &= ~(1 << QK_MOMENTARY_GET_LAYER(code));
+	}
+
+	output_states[code] += (pressed ? 1 : -1);
 	eprintf("OUTPUT %s, %d\n", code_name(code), (int)pressed);
+	return true;
 }
 
 layer_state_t layer_state = 1;
@@ -321,20 +354,11 @@ uint8_t get_highest_layer(layer_state_t state) {
 	}
 	return n;
 }
-void register_code16(uint16_t code) {
-	if (is_momentary(code))
-		layer_state |= (1 << QK_MOMENTARY_GET_LAYER(code));
-	else if (is_toggle(code))
-		layer_state ^= 1 << QK_TOGGLE_LAYER_GET_LAYER(code);
-	print_key(code, true);
-}
-void unregister_code16(uint16_t code) {
-	if (is_momentary(code))
-		layer_state &= ~(1 << QK_MOMENTARY_GET_LAYER(code));
-	print_key(code, false);
-}
 
-static void key(uint8_t code, bool pressed) {
+static BITSET(base_key_states, UINT8_MAX);
+static void key(uint8_t code) {
+	bool pressed = !bitset_get(base_key_states, code);
+	bitset_set(base_key_states, code, pressed);
 	keypos_t pos = reverse_map[code];
 	keyrecord_t record = { .event = { .key = pos, .pressed = pressed } };
 	eprintf(
@@ -346,18 +370,57 @@ static void key(uint8_t code, bool pressed) {
 	);
 	process_record_user(0, &record);
 }
+
+#include <stdlib.h>
+
 int main(int argc, char **argv) {
+	const static uint8_t base_keys[] = {
+#define F(x) x
+#define COMMA ,
+		MAP_BASE_KEYS(F, COMMA)
+#undef F
+#undef COMMA
+	};
 	fill_maps();
-	key(KC_ESC, 1);
-	key(KC_B, 1);
-	key(KC_B, 0);
-	key(KC_ESC, 0);
-	key(KC_D, 1);
-	key(KC_D, 0);
-	key(KC_ENTER, 1);
-	key(KC_ENTER, 0);
-	key(KC_D, 1);
-	key(KC_D, 0);
+	if (argc != 2) {
+		key(KC_SPACE);
+		key(KC_J);
+		key(KC_J);
+		key(KC_SPACE);
+	} else {
+		int length = atoi(argv[1]);
+
+		eprintf("%d\n", length);
+		for (;;) {
+			for (int i = 0; i < length; ++i)
+				key(base_keys[rand() % LENGTH(base_keys)]);
+			eprintf("\n");
+
+			int on_count = 0;
+			for (int code = 0; code < UINT8_MAX; ++code)
+				on_count += bitset_get(base_key_states, code) ? 1 : 0;
+			for (; on_count > 0; --on_count) {
+				int turn_off = rand() % on_count;
+				for (int code = 0; code < UINT8_MAX; ++code)
+					if (bitset_get(base_key_states, code)) {
+						if (turn_off == 0) {
+							key(code);
+							break;
+						} else {
+							--turn_off;
+						}
+					}
+			}
+
+			eprintf("\n");
+			for (int i = 0; i < LENGTH(output_states); ++i)
+				if (output_states[i] != 0) {
+					eprintf("FAILED with key %s.\n", code_name(i));
+					return 1;
+				}
+			eprintf("\n");
+		}
+	}
 	return 0;
 }
 #endif

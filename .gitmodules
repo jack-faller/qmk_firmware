@@ -25,3 +25,6 @@
 	path = lib/lvgl
 	url = https://github.com/qmk/lvgl.git
 	branch = release/v8.2
+[submodule "modules/stephen_ostermiller"]
+	path = modules/stephen_ostermiller
+	url = https://github.com/stephenostermiller/qmk_modules.git
