@@ -263,6 +263,10 @@ static bool is_toggle(uint16_t code) {
 	return QK_TOGGLE_LAYER <= code && code <= QK_TOGGLE_LAYER_MAX;
 }
 
+static void print_key(const char *prefix, uint16_t code, bool pressed) {
+	eprintf("%s %s %s\n", prefix, code_name(code), (pressed ? "down" : "up"));
+}
+
 static int output_states[UINT16_MAX];
 bool process_keycode_any(uint16_t code, bool pressed) {
 	if (pressed) {
@@ -276,7 +280,7 @@ bool process_keycode_any(uint16_t code, bool pressed) {
 	}
 
 	output_states[code] += (pressed ? 1 : -1);
-	eprintf("OUTPUT %s, %d\n", code_name(code), (int)pressed);
+	print_key("  OUTPUT", code, pressed);
 	return true;
 }
 
@@ -308,13 +312,7 @@ static void key(uint8_t code) {
 	bitset_set(base_key_states, code, pressed);
 	keypos_t pos = reverse_map[code];
 	keyrecord_t record = { .event = { .key = pos, .pressed = pressed } };
-	eprintf(
-		"key(%s (%d, %d), %d);\n",
-		code_name(code),
-		(int)pos.col,
-		(int)pos.row,
-		(int)pressed
-	);
+	print_key("INPUT", code, pressed);
 	process_record_user(0, &record);
 }
 
@@ -330,10 +328,14 @@ int main(int argc, char **argv) {
 	};
 	fill_maps();
 	if (argc != 2) {
-		key(KC_SPACE);
-		key(KC_J);
-		key(KC_J);
-		key(KC_SPACE);
+		key(KC_K);
+		key(KC_W);
+		key(KC_W);
+		key(KC_K);
+		key(KC_K);
+		key(KC_W);
+		key(KC_K);
+		key(KC_W);
 	} else {
 		int length = atoi(argv[1]);
 
