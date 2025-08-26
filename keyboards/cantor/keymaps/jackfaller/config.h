@@ -1,2 +1,3 @@
 #define BOOTMAGIC_COLUMN 1
 #define BOOTMAGIC_ROW 0
+#define QUICK_TAP_TERM 0
